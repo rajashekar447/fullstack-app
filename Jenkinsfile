@@ -6,16 +6,21 @@ pipeline {
         timestamps()
     }
 
+    environment {
+        COMPOSE_PROJECT_NAME = 'task-manager-ci-cd'
+    }
+
     stages {
         stage('Checkout') {
             steps {
-                echo 'Source code checked out by Jenkins from GitHub.'
+                checkout scm
+                sh 'git log -1 --oneline'
             }
         }
 
         stage('Validate') {
             steps {
-                sh 'docker-compose -f compose.yaml config -q'
+                sh 'docker-compose -p task-manager-ci-cd -f compose.yaml config -q'
                 sh 'node --check backend/server.js'
                 echo 'Validation successful.'
             }
@@ -23,30 +28,34 @@ pipeline {
 
         stage('Build Docker Images') {
             steps {
-                sh 'docker-compose -f compose.yaml build'
+                sh 'docker-compose -p task-manager-ci-cd -f compose.yaml build'
             }
         }
 
         stage('Deploy Application') {
             steps {
-                sh 'docker-compose -f compose.yaml up -d --force-recreate'
+                sh 'docker-compose -p task-manager-ci-cd -f compose.yaml up -d --force-recreate'
             }
         }
 
         stage('Verify Application') {
             steps {
                 sh '''
+                    set -eu
+
                     for i in $(seq 1 15); do
                         if curl -fsS http://localhost:8088/api/tasks; then
+                            echo
                             echo "Application verification successful."
+                            docker-compose -p task-manager-ci-cd -f compose.yaml ps
                             exit 0
                         fi
                         sleep 2
                     done
 
                     echo "Application verification failed."
-                    docker-compose -f compose.yaml ps
-                    docker-compose -f compose.yaml logs --tail=50
+                    docker-compose -p task-manager-ci-cd -f compose.yaml ps
+                    docker-compose -p task-manager-ci-cd -f compose.yaml logs --tail=50
                     exit 1
                 '''
             }
