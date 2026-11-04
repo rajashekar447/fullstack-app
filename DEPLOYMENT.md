@@ -30,3 +30,4 @@
 - Git source control
 - Docker deployment environment
 GitHub webhook integration test
+Testing Jenkins automatic pipeline trigger
