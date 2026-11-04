@@ -1,2 +1,21 @@
-backend/node_modules/
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Credentials
+credentials/
+secrets/
+.aws/
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
