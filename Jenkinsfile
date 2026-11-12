@@ -14,6 +14,9 @@ pipeline {
         AWS_PROFILE = 'jenkins-ecr-push'
         COMPOSE_PROJECT_NAME = 'fullstack-app'
         DOCKER_CONFIG = "/tmp/jenkins-docker-${BUILD_NUMBER}"
+
+        DEPLOYMENT_STATE_FILE = '/var/lib/jenkins/fullstack-app-last-known-good'
+        DEPLOYMENT_STARTED = 'false'
     }
 
     stages {
@@ -36,6 +39,29 @@ pipeline {
                         "${accountId}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
 
                     env.IMAGE_TAG = env.BUILD_NUMBER
+
+                    def stateFileStatus = sh(
+                        script: "test -s '${env.DEPLOYMENT_STATE_FILE}'",
+                        returnStatus: true
+                    )
+
+                    if (stateFileStatus != 0) {
+                       error("Deployment state file is missing or empty: ${env.DEPLOYMENT_STATE_FILE}")
+                    }
+
+                    def previousTag = sh(
+                        script: "cat '${env.DEPLOYMENT_STATE_FILE}'",
+                        returnStdout: true
+                    ).trim()
+
+                    if (!(previousTag ==~ /[A-Za-z0-9_.-]+/)) {
+                        error("Invalid previous deployment tag: ${previousTag}")
+                    }
+
+                    env.ROLLBACK_TAG = previousTag
+
+                    echo "Current build tag: ${env.IMAGE_TAG}"
+                    echo "Last known-good tag: ${env.ROLLBACK_TAG}"
                 }
 
                 sh '''
@@ -124,6 +150,11 @@ pipeline {
 
         stage('Deploy Application') {
             steps {
+                script {
+                    env.DEPLOYMENT_STARTED = 'true'
+                    echo "Deployment started. Rollback target: ${env.ROLLBACK_TAG}"
+                }
+
                 sh '''
                     set -eu
 
@@ -178,6 +209,15 @@ pipeline {
 
                     exit 1
                 '''
+
+                sh '''
+                    set -eu
+
+                    printf '%s\\n' "$IMAGE_TAG" \
+                      > "$DEPLOYMENT_STATE_FILE"
+
+                    echo "Last known-good release updated to: $IMAGE_TAG"
+                '''
             }
         }
     }
@@ -188,13 +228,81 @@ pipeline {
         }
 
         failure {
-            echo 'Pipeline failed. Check the stage logs before retrying.'
+            echo 'Pipeline failed.'
+
+            script {
+                if (env.DEPLOYMENT_STARTED == 'true') {
+                    echo "Attempting automatic rollback to release ${env.ROLLBACK_TAG}"
+
+                    int rollbackStatus = sh(
+                        returnStatus: true,
+                        script: '''
+                            set -eu
+
+                            printf 'ECR_REGISTRY=%s\\nIMAGE_TAG=%s\\n' \
+                              "$ECR_REGISTRY" "$ROLLBACK_TAG" > .env
+
+                            echo "Restoring release: $ROLLBACK_TAG"
+
+                            docker compose \
+                              --env-file .env \
+                              -p "$COMPOSE_PROJECT_NAME" pull
+
+                            docker compose \
+                              --env-file .env \
+                              -p "$COMPOSE_PROJECT_NAME" up -d --force-recreate
+
+                            for i in $(seq 1 30); do
+                                if curl -fsS http://localhost/ >/dev/null && \
+                                   curl -fsS http://localhost/api/tasks >/dev/null && \
+                                   curl -fsS http://localhost/notifications/health >/dev/null && \
+                                   curl -fsS http://localhost/notifications/api/notifications >/dev/null
+                                then
+                                    echo "Automatic rollback successful."
+
+                                    docker compose \
+                                      --env-file .env \
+                                      -p "$COMPOSE_PROJECT_NAME" ps
+
+                                    exit 0
+                                fi
+
+                                echo "Waiting for rollback verification... attempt $i/30"
+                                sleep 2
+                            done
+
+                            echo "Rollback verification failed."
+
+                            docker compose \
+                              --env-file .env \
+                              -p "$COMPOSE_PROJECT_NAME" ps || true
+
+                            docker compose \
+                              --env-file .env \
+                              -p "$COMPOSE_PROJECT_NAME" logs --tail=50 || true
+
+                            exit 1
+                        '''
+                    )
+
+                    if (rollbackStatus == 0) {
+                        echo "Rollback completed. Restored release: ${env.ROLLBACK_TAG}"
+                    } else {
+                        echo "CRITICAL: Automatic rollback failed. Manual investigation is required."
+                    }
+                } else {
+                    echo 'Deployment was not started. No rollback is necessary.'
+                }
+            }
         }
 
         always {
             sh '''
                 if [ -d "$DOCKER_CONFIG" ]; then
-                    docker logout "$ECR_REGISTRY" || true
+                    if [ -n "${ECR_REGISTRY:-}" ]; then
+                        docker logout "$ECR_REGISTRY" || true
+                    fi
+
                     rm -rf "$DOCKER_CONFIG"
                 fi
             '''
