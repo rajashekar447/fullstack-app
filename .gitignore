@@ -1,2 +1,42 @@
-backend/node_modules/
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Credentials
+credentials/
+secrets/
+.aws/
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+
+# Terraform local files and state
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+tfplan
+terraform-plan-output.txt
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform generated backups
+terraform.tfstate.backup
+
+# Runtime and generated files
+.DS_Store

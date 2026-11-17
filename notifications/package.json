@@ -1,0 +1,12 @@
+{
+  "name": "task-manager-notifications",
+  "version": "1.0.0",
+  "description": "Notifications microservice for Task Manager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

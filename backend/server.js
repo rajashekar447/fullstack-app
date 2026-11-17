@@ -8,6 +8,14 @@ app.use(express.json());
 let tasks = [];
 let nextId = 1;
 
+// Health check
+app.get("/health", (req, res) => {
+    res.status(200).json({
+        status: "healthy",
+        service: "backend"
+    });
+});
+
 // Get all tasks
 app.get("/api/tasks", (req, res) => {
     res.json(tasks);
